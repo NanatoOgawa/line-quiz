@@ -4,7 +4,8 @@ import { WebhookRequestBody, MessageEvent, TextMessage, validateSignature } from
 
 export async function POST(req: NextRequest) {
   try {
-    const body: WebhookRequestBody = await req.json();
+    // リクエストボディを1回だけ読み取る
+    const rawBody = await req.text();
     
     // 署名検証
     const signature = req.headers.get('x-line-signature');
@@ -12,10 +13,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No signature' }, { status: 400 });
     }
 
-    const rawBody = await req.text();
     if (!validateSignature(rawBody, process.env.LINE_CHANNEL_SECRET || '', signature)) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
+
+    // 署名検証後にJSONパース
+    const body: WebhookRequestBody = JSON.parse(rawBody);
 
     // イベントの処理
     const results = await Promise.allSettled(
