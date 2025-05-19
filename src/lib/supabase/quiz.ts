@@ -1,0 +1,160 @@
+import { supabase } from './client';
+import { Quiz, CreateQuizInput, UpdateQuizInput } from '@/types/quiz';
+import { QUIZ_DIFFICULTY, QUIZ_CATEGORIES } from '@/utils/constants';
+
+// データベースから取得したデータをQuiz型に変換する関数
+function transformQuizData(data: any): Quiz {
+  return {
+    ...data,
+    difficulty: data.difficulty as 'easy' | 'medium' | 'hard',
+  };
+}
+
+export async function getQuizzes(): Promise<Quiz[]> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching quizzes:', error);
+    throw error;
+  }
+
+  return data.map(transformQuizData);
+}
+
+export async function getQuizById(id: string): Promise<Quiz | null> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Error fetching quiz:', error);
+    throw error;
+  }
+
+  return data ? transformQuizData(data) : null;
+}
+
+export async function createQuiz(quiz: CreateQuizInput): Promise<Quiz> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .insert(quiz)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating quiz:', error);
+    throw error;
+  }
+
+  return transformQuizData(data);
+}
+
+export async function updateQuiz(id: string, quiz: UpdateQuizInput): Promise<Quiz> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .update(quiz)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating quiz:', error);
+    throw error;
+  }
+
+  return transformQuizData(data);
+}
+
+export async function deleteQuiz(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('quizzes')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting quiz:', error);
+    throw error;
+  }
+}
+
+export async function getQuizzesByCategory(category: string): Promise<Quiz[]> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .eq('category', category)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching quizzes by category:', error);
+    throw error;
+  }
+
+  return data.map(transformQuizData);
+}
+
+export async function getQuizzesByDifficulty(difficulty: 'easy' | 'medium' | 'hard'): Promise<Quiz[]> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .eq('difficulty', difficulty)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching quizzes by difficulty:', error);
+    throw error;
+  }
+
+  return data.map(transformQuizData);
+}
+
+export async function searchQuizzes(searchTerm: string): Promise<Quiz[]> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .ilike('question', `%${searchTerm}%`)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error searching quizzes:', error);
+    throw error;
+  }
+
+  return data.map(transformQuizData);
+}
+
+export async function getRandomQuiz(): Promise<Quiz | null> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .order('random()')
+    .limit(1)
+    .single();
+
+  if (error) {
+    console.error('Error fetching random quiz:', error);
+    throw error;
+  }
+
+  return data ? transformQuizData(data) : null;
+}
+
+export async function getQuizzesByDateRange(startDate: string, endDate: string): Promise<Quiz[]> {
+  const { data, error } = await supabase
+    .from('quizzes')
+    .select('*')
+    .gte('created_at', startDate)
+    .lte('created_at', endDate)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching quizzes by date range:', error);
+    throw error;
+  }
+
+  return data.map(transformQuizData);
+} 

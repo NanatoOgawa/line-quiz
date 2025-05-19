@@ -3,26 +3,15 @@ import { lineClient } from '@/lib/line/client';
 import { WebhookRequestBody, MessageEvent, TextMessage, validateSignature } from '@line/bot-sdk';
 import { createQuizCard } from '@/lib/line/templates/quiz-card';
 import { Quiz } from '@/types/quiz';
+import { getRandomQuiz } from '@/lib/supabase/quiz';
 
-// テスト用のクイズデータ
-const sampleQuiz: Quiz = {
-  id: '1',
-  question: 'Next.jsの最新バージョンは？',
-  options: ['13.0.0', '14.0.0', '15.0.0', '16.0.0'],
-  correct_answer: 2,
-  explanation: 'Next.js 15.0.0が最新バージョンです。',
-  category: 'Web開発',
-  difficulty: 'easy' as const,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString()
-};
+// クイズセッションを管理するMap（実際の運用ではRedisなどを使用することを推奨）
+const quizSessions = new Map<string, Quiz>();
 
 export async function POST(req: NextRequest) {
   try {
-    // リクエストボディを1回だけ読み取る
     const rawBody = await req.text();
     
-    // 署名検証
     const signature = req.headers.get('x-line-signature');
     if (!signature) {
       return NextResponse.json({ error: 'No signature' }, { status: 400 });
@@ -32,10 +21,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
-    // 署名検証後にJSONパース
     const body: WebhookRequestBody = JSON.parse(rawBody);
 
-    // イベントの処理
     const results = await Promise.allSettled(
       body.events.map(async (event) => {
         try {
@@ -45,13 +32,32 @@ export async function POST(req: NextRequest) {
               const message = messageEvent.message.text.toLowerCase();
               
               if (message === 'クイズ') {
+                // データベースからランダムなクイズを取得
+                const quiz = await getRandomQuiz();
+                if (!quiz) {
+                  await lineClient.replyMessage(
+                    messageEvent.replyToken,
+                    [
+                      {
+                        type: 'text',
+                        text: '申し訳ありません。現在クイズがありません。',
+                      },
+                    ]
+                  );
+                  return;
+                }
+
+                // クイズセッションに保存（userIdが存在することを確認）
+                if (messageEvent.source.userId) {
+                  quizSessions.set(messageEvent.source.userId, quiz);
+                }
+
                 // クイズカードを送信
                 await lineClient.replyMessage(
                   messageEvent.replyToken,
-                  [createQuizCard(sampleQuiz)]
+                  [createQuizCard(quiz)]
                 );
               } else {
-                // 通常のテキストメッセージの応答
                 await lineClient.replyMessage(
                   messageEvent.replyToken,
                   [
@@ -63,35 +69,52 @@ export async function POST(req: NextRequest) {
                 );
               }
             }
-          } else if (event.type === 'postback') {
-            // ポストバックイベントの処理（クイズの回答など）
-            if ('replyToken' in event) {
-              const [action, , answerIndex] = event.postback.data.split(':');
-              
-              if (action === 'answer') {
-                const isCorrect = parseInt(answerIndex) === sampleQuiz.correct_answer;
-                await lineClient.replyMessage(
-                  event.replyToken,
-                  [
-                    {
-                      type: 'text',
-                      text: isCorrect 
-                        ? '正解です！🎉\n' + sampleQuiz.explanation
-                        : '残念、不正解です。\n' + sampleQuiz.explanation
-                    }
-                  ]
-                );
-              } else if (action === 'hint') {
-                await lineClient.replyMessage(
-                  event.replyToken,
-                  [
-                    {
-                      type: 'text',
-                      text: 'ヒント: このクイズはWeb開発に関する問題です。'
-                    }
-                  ]
-                );
-              }
+          }
+          // ポストバックイベントの処理（クイズの回答など）
+          if (event.type === 'postback' && 'replyToken' in event && event.source.userId) {
+            const userId = event.source.userId;
+            const quiz = quizSessions.get(userId);
+            
+            if (!quiz) {
+              await lineClient.replyMessage(
+                event.replyToken,
+                [
+                  {
+                    type: 'text',
+                    text: 'クイズのセッションが切れました。「クイズ」と送信して新しいクイズを開始してください。',
+                  },
+                ]
+              );
+              return;
+            }
+
+            const [action, , answerIndex] = event.postback.data.split(':');
+            
+            if (action === 'answer') {
+              const isCorrect = parseInt(answerIndex) === quiz.correct_answer;
+              await lineClient.replyMessage(
+                event.replyToken,
+                [
+                  {
+                    type: 'text',
+                    text: isCorrect 
+                      ? `正解です！🎉\n${quiz.explanation || ''}`
+                      : `残念、不正解です。\n${quiz.explanation || ''}`
+                  }
+                ]
+              );
+              // セッションをクリア
+              quizSessions.delete(userId);
+            } else if (action === 'hint') {
+              await lineClient.replyMessage(
+                event.replyToken,
+                [
+                  {
+                    type: 'text',
+                    text: `ヒント: このクイズは${quiz.category}に関する問題です。`
+                  }
+                ]
+              );
             }
           }
         } catch (error) {
@@ -101,7 +124,6 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // 処理結果の確認
     const hasErrors = results.some(result => result.status === 'rejected');
     if (hasErrors) {
       console.error('Some events failed to process:', results);
