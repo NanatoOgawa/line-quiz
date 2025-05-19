@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lineClient } from '@/lib/line/client';
 import { WebhookRequestBody, MessageEvent, TextMessage, validateSignature } from '@line/bot-sdk';
 import { createQuizCard } from '@/lib/line/templates/quiz-card';
-import { getRandomQuiz } from '@/lib/supabase/quiz';
-import { quizSessionManager } from '@/lib/line/session';
+import { quizRepository } from '@/lib/features/quiz/service';
+import { quizSessionManager } from '@/lib/features/quiz/session';
 import { AppError, ErrorCodes, handleError } from '@/types/error';
 
 type PostbackAction = 'answer' | 'hint';
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
             const message = messageEvent.message.text.toLowerCase();
             
             if (message === 'クイズ') {
-              const quiz = await getRandomQuiz();
+              const quiz = await quizRepository.findRandom();
               if (!quiz) {
                 await lineClient.replyMessage(
                   messageEvent.replyToken,
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
                 return;
               }
 
-              quizSessionManager.createSession(messageEvent.source.userId, quiz);
+              await quizSessionManager.createSession(messageEvent.source.userId, quiz);
               await lineClient.replyMessage(
                 messageEvent.replyToken,
                 [createQuizCard(quiz)]
@@ -82,10 +82,16 @@ export async function POST(req: NextRequest) {
             
             if (action === 'answer') {
               try {
-                const session = quizSessionManager.getSession(userId);
-                quizSessionManager.recordAttempt(userId);
+                const session = await quizSessionManager.getSession(userId);
+                await quizSessionManager.recordAttempt(userId);
+                
+                const startTime = session.startTime.getTime();
+                const now = new Date().getTime();
+                const responseTime = now - startTime;
                 
                 const isCorrect = parseInt(answerIndex || '') === session.quiz.correct_answer;
+                await quizSessionManager.updateSessionStats(userId, isCorrect, responseTime);
+                
                 await lineClient.replyMessage(
                   event.replyToken,
                   [{
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
                       : `残念、不正解です。\n${session.quiz.explanation || ''}`
                   }]
                 );
-                quizSessionManager.deleteSession(userId);
+                await quizSessionManager.deleteSession(userId);
               } catch (error) {
                 if (error instanceof AppError) {
                   await lineClient.replyMessage(
@@ -108,8 +114,8 @@ export async function POST(req: NextRequest) {
               }
             } else if (action === 'hint') {
               try {
-                const session = quizSessionManager.getSession(userId);
-                if (!quizSessionManager.canShowHint(userId)) {
+                const session = await quizSessionManager.getSession(userId);
+                if (!await quizSessionManager.canShowHint(userId)) {
                   await lineClient.replyMessage(
                     event.replyToken,
                     [{
@@ -120,7 +126,7 @@ export async function POST(req: NextRequest) {
                   return;
                 }
 
-                quizSessionManager.recordHintShown(userId);
+                await quizSessionManager.recordHintShown(userId);
                 await lineClient.replyMessage(
                   event.replyToken,
                   [{
