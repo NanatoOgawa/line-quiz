@@ -5,14 +5,12 @@ export interface QuizSession {
   startTime: Date;
   attempts: number;
   lastHintTime?: Date;
-  stats?: QuizSessionStats;
-}
-
-export interface QuizSessionStats {
-  totalCorrect: number;
-  totalAttempts: number;
-  averageResponseTime: number;
-  lastResponseTime?: Date;
+  stats?: {
+    totalCorrect: number;
+    totalAttempts: number;
+    averageResponseTime: number;
+    lastResponseTime?: Date;
+  };
 }
 
 export interface QuizSessionConfig {

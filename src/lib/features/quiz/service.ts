@@ -2,6 +2,19 @@ import { Quiz, CreateQuizInput, UpdateQuizInput } from '@/types/quiz';
 import { supabase } from '@/lib/supabase/client';
 import { AppError, ErrorCodes } from '@/types/error';
 
+// データベースから取得したクイズデータの型定義
+interface QuizDatabaseRecord {
+  id: string;
+  question: string;
+  options: string[];
+  correct_answer: number;
+  explanation: string | null;
+  category: string;
+  difficulty: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QuizRepository {
   findAll(): Promise<Quiz[]>;
   findById(id: string): Promise<Quiz | null>;
@@ -15,7 +28,7 @@ export interface QuizRepository {
 }
 
 export class SupabaseQuizRepository implements QuizRepository {
-  private transformQuizData(data: any): Quiz {
+  private transformQuizData(data: QuizDatabaseRecord): Quiz {
     return {
       ...data,
       difficulty: data.difficulty as 'easy' | 'medium' | 'hard',

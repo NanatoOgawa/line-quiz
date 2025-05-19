@@ -4,8 +4,7 @@ import {
   QuizSession,
   QuizSessionConfig,
   QuizSessionManager,
-  DEFAULT_QUIZ_SESSION_CONFIG,
-  QuizSessionStats
+  DEFAULT_QUIZ_SESSION_CONFIG
 } from './types';
 
 export class InMemoryQuizSessionManager implements QuizSessionManager {
@@ -82,7 +81,6 @@ export class InMemoryQuizSessionManager implements QuizSessionManager {
   }
 
   async cleanupExpiredSessions(): Promise<void> {
-    const now = new Date();
     for (const [userId, session] of this.sessions.entries()) {
       if (this.isSessionExpired(session)) {
         await this.deleteSession(userId);
