@@ -137,11 +137,28 @@ export async function searchQuizzes(searchTerm: string): Promise<Quiz[]> {
 }
 
 export async function getRandomQuiz(): Promise<Quiz | null> {
+  // まず、クイズの総数を取得
+  const { count, error: countError } = await supabase
+    .from('quizzes')
+    .select('*', { count: 'exact', head: true });
+
+  if (countError) {
+    console.error('Error counting quizzes:', countError);
+    throw countError;
+  }
+
+  if (!count || count === 0) {
+    return null;
+  }
+
+  // ランダムなオフセットを生成
+  const randomOffset = Math.floor(Math.random() * count);
+
+  // オフセットを使用してランダムなクイズを取得
   const { data, error } = await supabase
     .from('quizzes')
     .select('*')
-    .order('random()')
-    .limit(1)
+    .range(randomOffset, randomOffset)
     .single();
 
   if (error) {
