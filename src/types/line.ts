@@ -1,4 +1,4 @@
-import { Message } from '@line/bot-sdk';
+import { Message, TextMessage } from '@line/bot-sdk';
 
 export interface LineUser {
   userId: string;
@@ -7,9 +7,7 @@ export interface LineUser {
   statusMessage?: string;
 }
 
-export interface QuizMessage extends Message {
-  type: 'text';
-  text: string;
+export type QuizMessage = TextMessage & {
   quickReply?: {
     items: {
       type: 'action';
@@ -20,7 +18,7 @@ export interface QuizMessage extends Message {
       };
     }[];
   };
-}
+};
 
 export interface QuizState {
   userId: string;
