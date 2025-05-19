@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     // クイズの取得
     const { data: quizzes, error } = await supabase
