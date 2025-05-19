@@ -1,4 +1,4 @@
-import { Message, TextMessage } from '@line/bot-sdk';
+import { TextMessage } from '@line/bot-sdk';
 
 export interface LineUser {
   userId: string;
