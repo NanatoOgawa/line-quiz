@@ -1,9 +1,18 @@
 import { supabase } from './client';
 import { Quiz, CreateQuizInput, UpdateQuizInput } from '@/types/quiz';
-import { QUIZ_DIFFICULTY, QUIZ_CATEGORIES } from '@/utils/constants';
 
 // データベースから取得したデータをQuiz型に変換する関数
-function transformQuizData(data: any): Quiz {
+function transformQuizData(data: {
+  id: string;
+  question: string;
+  options: string[];
+  correct_answer: number;
+  explanation: string | null;
+  category: string;
+  difficulty: string;
+  created_at: string;
+  updated_at: string;
+}): Quiz {
   return {
     ...data,
     difficulty: data.difficulty as 'easy' | 'medium' | 'hard',

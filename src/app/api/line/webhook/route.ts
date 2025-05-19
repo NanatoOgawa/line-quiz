@@ -2,11 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lineClient } from '@/lib/line/client';
 import { WebhookRequestBody, MessageEvent, TextMessage, validateSignature } from '@line/bot-sdk';
 import { createQuizCard } from '@/lib/line/templates/quiz-card';
-import { Quiz } from '@/types/quiz';
 import { getRandomQuiz } from '@/lib/supabase/quiz';
+import { quizSessionManager } from '@/lib/line/session';
+import { AppError, ErrorCodes, handleError } from '@/types/error';
 
-// クイズセッションを管理するMap（実際の運用ではRedisなどを使用することを推奨）
-const quizSessions = new Map<string, Quiz>();
+type PostbackAction = 'answer' | 'hint';
+type PostbackData = {
+  action: PostbackAction;
+  quizId: string;
+  answerIndex?: string;
+};
+
+function parsePostbackData(data: string): PostbackData {
+  const [action, quizId, answerIndex] = data.split(':');
+  if (action !== 'answer' && action !== 'hint') {
+    throw new AppError('Invalid postback action', ErrorCodes.INVALID_POSTBACK);
+  }
+  return { action, quizId, answerIndex };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,11 +27,11 @@ export async function POST(req: NextRequest) {
     
     const signature = req.headers.get('x-line-signature');
     if (!signature) {
-      return NextResponse.json({ error: 'No signature' }, { status: 400 });
+      throw new AppError('No signature', ErrorCodes.INVALID_SIGNATURE);
     }
 
     if (!validateSignature(rawBody, process.env.LINE_CHANNEL_SECRET || '', signature)) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+      throw new AppError('Invalid signature', ErrorCodes.INVALID_SIGNATURE);
     }
 
     const body: WebhookRequestBody = JSON.parse(rawBody);
@@ -28,93 +41,103 @@ export async function POST(req: NextRequest) {
         try {
           if (event.type === 'message' && event.message.type === 'text') {
             const messageEvent = event as MessageEvent & { message: TextMessage };
-            if ('replyToken' in messageEvent) {
-              const message = messageEvent.message.text.toLowerCase();
-              
-              if (message === 'クイズ') {
-                // データベースからランダムなクイズを取得
-                const quiz = await getRandomQuiz();
-                if (!quiz) {
+            if (!('replyToken' in messageEvent) || !messageEvent.source.userId) {
+              return;
+            }
+
+            const message = messageEvent.message.text.toLowerCase();
+            
+            if (message === 'クイズ') {
+              const quiz = await getRandomQuiz();
+              if (!quiz) {
+                await lineClient.replyMessage(
+                  messageEvent.replyToken,
+                  [{
+                    type: 'text',
+                    text: '申し訳ありません。現在クイズがありません。',
+                  }]
+                );
+                return;
+              }
+
+              quizSessionManager.createSession(messageEvent.source.userId, quiz);
+              await lineClient.replyMessage(
+                messageEvent.replyToken,
+                [createQuizCard(quiz)]
+              );
+            } else {
+              await lineClient.replyMessage(
+                messageEvent.replyToken,
+                [{
+                  type: 'text',
+                  text: '「クイズ」と送信すると、クイズが始まります！',
+                }]
+              );
+            }
+          }
+
+          if (event.type === 'postback' && 'replyToken' in event && event.source.userId) {
+            const userId = event.source.userId;
+            const { action, answerIndex } = parsePostbackData(event.postback.data);
+            
+            if (action === 'answer') {
+              try {
+                const session = quizSessionManager.getSession(userId);
+                quizSessionManager.recordAttempt(userId);
+                
+                const isCorrect = parseInt(answerIndex || '') === session.quiz.correct_answer;
+                await lineClient.replyMessage(
+                  event.replyToken,
+                  [{
+                    type: 'text',
+                    text: isCorrect 
+                      ? `正解です！🎉\n${session.quiz.explanation || ''}`
+                      : `残念、不正解です。\n${session.quiz.explanation || ''}`
+                  }]
+                );
+                quizSessionManager.deleteSession(userId);
+              } catch (error) {
+                if (error instanceof AppError) {
                   await lineClient.replyMessage(
-                    messageEvent.replyToken,
-                    [
-                      {
-                        type: 'text',
-                        text: '申し訳ありません。現在クイズがありません。',
-                      },
-                    ]
+                    event.replyToken,
+                    [{ type: 'text', text: error.message }]
+                  );
+                } else {
+                  throw error;
+                }
+              }
+            } else if (action === 'hint') {
+              try {
+                const session = quizSessionManager.getSession(userId);
+                if (!quizSessionManager.canShowHint(userId)) {
+                  await lineClient.replyMessage(
+                    event.replyToken,
+                    [{
+                      type: 'text',
+                      text: 'ヒントは5分に1回しか表示できません。しばらく待ってから再度お試しください。'
+                    }]
                   );
                   return;
                 }
 
-                // クイズセッションに保存（userIdが存在することを確認）
-                if (messageEvent.source.userId) {
-                  quizSessions.set(messageEvent.source.userId, quiz);
+                quizSessionManager.recordHintShown(userId);
+                await lineClient.replyMessage(
+                  event.replyToken,
+                  [{
+                    type: 'text',
+                    text: `ヒント: このクイズは${session.quiz.category}に関する問題です。`
+                  }]
+                );
+              } catch (error) {
+                if (error instanceof AppError) {
+                  await lineClient.replyMessage(
+                    event.replyToken,
+                    [{ type: 'text', text: error.message }]
+                  );
+                } else {
+                  throw error;
                 }
-
-                // クイズカードを送信
-                await lineClient.replyMessage(
-                  messageEvent.replyToken,
-                  [createQuizCard(quiz)]
-                );
-              } else {
-                await lineClient.replyMessage(
-                  messageEvent.replyToken,
-                  [
-                    {
-                      type: 'text',
-                      text: '「クイズ」と送信すると、クイズが始まります！',
-                    },
-                  ]
-                );
               }
-            }
-          }
-          // ポストバックイベントの処理（クイズの回答など）
-          if (event.type === 'postback' && 'replyToken' in event && event.source.userId) {
-            const userId = event.source.userId;
-            const quiz = quizSessions.get(userId);
-            
-            if (!quiz) {
-              await lineClient.replyMessage(
-                event.replyToken,
-                [
-                  {
-                    type: 'text',
-                    text: 'クイズのセッションが切れました。「クイズ」と送信して新しいクイズを開始してください。',
-                  },
-                ]
-              );
-              return;
-            }
-
-            const [action, , answerIndex] = event.postback.data.split(':');
-            
-            if (action === 'answer') {
-              const isCorrect = parseInt(answerIndex) === quiz.correct_answer;
-              await lineClient.replyMessage(
-                event.replyToken,
-                [
-                  {
-                    type: 'text',
-                    text: isCorrect 
-                      ? `正解です！🎉\n${quiz.explanation || ''}`
-                      : `残念、不正解です。\n${quiz.explanation || ''}`
-                  }
-                ]
-              );
-              // セッションをクリア
-              quizSessions.delete(userId);
-            } else if (action === 'hint') {
-              await lineClient.replyMessage(
-                event.replyToken,
-                [
-                  {
-                    type: 'text',
-                    text: `ヒント: このクイズは${quiz.category}に関する問題です。`
-                  }
-                ]
-              );
             }
           }
         } catch (error) {
@@ -136,15 +159,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'OK' });
   } catch (error) {
     console.error('Webhook error:', error);
-    if (error instanceof Error) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
-    }
+    const errorResponse = handleError(error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      errorResponse,
+      { status: errorResponse.code === ErrorCodes.INVALID_SIGNATURE ? 401 : 500 }
     );
   }
 } 
