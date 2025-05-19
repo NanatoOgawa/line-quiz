@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lineClient } from '@/lib/line/client';
 import { WebhookRequestBody, MessageEvent, TextMessage, validateSignature } from '@line/bot-sdk';
 import { createQuizCard } from '@/lib/line/templates/quiz-card';
-import { supabase } from '@/lib/supabase/client';
 import { Quiz } from '@/types/quiz';
 
 // テスト用のクイズデータ
@@ -67,7 +66,7 @@ export async function POST(req: NextRequest) {
           } else if (event.type === 'postback') {
             // ポストバックイベントの処理（クイズの回答など）
             if ('replyToken' in event) {
-              const [action, quizId, answerIndex] = event.postback.data.split(':');
+              const [action, , answerIndex] = event.postback.data.split(':');
               
               if (action === 'answer') {
                 const isCorrect = parseInt(answerIndex) === sampleQuiz.correct_answer;
