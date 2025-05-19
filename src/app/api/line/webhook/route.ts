@@ -17,15 +17,15 @@ export async function POST(req: NextRequest) {
       body.events.map(async (event) => {
         if (event.type === 'message' && event.message.type === 'text') {
           // テキストメッセージの処理
-          await lineClient.replyMessage({
-            replyToken: event.replyToken,
-            messages: [
+          await lineClient.replyMessage(
+            event.replyToken,
+            [
               {
                 type: 'text',
                 text: `受信したメッセージ: ${event.message.text}`,
               },
-            ],
-          });
+            ]
+          );
         }
       })
     );
